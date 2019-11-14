@@ -108,4 +108,4 @@ venv.bak/
 ./small_test
 ./small_train
 ./small_val
-.pkl
+.pkl            
