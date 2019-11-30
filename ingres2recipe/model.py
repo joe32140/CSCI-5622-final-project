@@ -5,16 +5,16 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch
 
-class DAN(nn.Module):
+class Ingres2Recipe(nn.Module):
     """
     BagOfWords classification model
     """
-    def __init__(self, vocab_size, emb_dim, feature_len, dropout, is_feature=False, is_text=True):
+    def __init__(self, vocab_size, emb_dim, dropout):
         """
         @param vocab_size: size of the vocabulary.
         @param emb_dim: size of the word embedding
         """
-        super(DAN, self).__init__()
+        super(Ingres2Recipe, self).__init__()
         # pay attention to padding_idx
         self.embed = nn.Embedding(vocab_size, emb_dim, padding_idx=0)
 
@@ -36,7 +36,7 @@ class DAN(nn.Module):
         r = self.embed(recipes)
         r = self.dropout(r)
         r = torch.sum(r, dim=1)
-        r /= r_length.float()
+        r /= r_length.float()+ 1e-10
         r = self.linear_r1(r)
         r = self.dropout(r)
         r = self.linear_r2(r)
@@ -44,7 +44,7 @@ class DAN(nn.Module):
         ing = self.embed(ingres)
         ing = self.dropout(ing)
         ing = torch.sum(ing, dim=1)
-        ing /= i_length.float()
+        ing /= i_length.float() + 1e-10
         ing = self.linear_i1(ing)
         ing = self.dropout(ing)
         ing = self.linear_i2(ing)

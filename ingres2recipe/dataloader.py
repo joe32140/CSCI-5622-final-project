@@ -3,6 +3,7 @@ import numpy as np
 from torch.utils.data.dataset import Dataset
 from build_vocab import Vocabulary
 import Constants
+import json
 import pandas as pd
 import pickle
 from sklearn.model_selection import train_test_split
@@ -14,7 +15,7 @@ class Ingres2RecipeDataset(Dataset):
     def __init__(self, vocab, data, feature=None, period="24"):
         self.data = data
         self.vocab = vocab
-        self.max_len = 400
+        self.max_len = 40
 
     def __getitem__(self, index):
         # 0: recipe_id, 1:instruction/recipe, 2:list of ingres
@@ -50,7 +51,7 @@ class Ingres2RecipeDataset(Dataset):
         return recipes, ingres, r_lengths, i_lengths
 
     def __len__(self):
-        return len(self.listfiles)
+        return len(self.data)
 
 def get_loader(data, vocab, batch_size, shuffle, num_workers):
     ingres2recipe = Ingres2RecipeDataset(vocab, data)
@@ -59,11 +60,10 @@ def get_loader(data, vocab, batch_size, shuffle, num_workers):
                                               batch_size=batch_size,
                                               shuffle=shuffle,
                                               num_workers=num_workers,
-                                              collate_fn=Ingres2RecipeDataset.collate_fn)
+                                              collate_fn=ingres2recipe.collate_fn)
     return data_loader
 
-def get_loaders(args, is_test=False, is_feature=False):
-    print(f"Note name : {args.name}")
+def get_loaders(args):
     with open(f"vocab.pkl",'rb') as f:
         print("----- Loading Vocab -----")
         vocab = pickle.load(f)

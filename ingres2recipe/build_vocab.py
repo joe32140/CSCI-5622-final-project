@@ -6,6 +6,7 @@ from collections import Counter
 import numpy as np
 import re
 import pandas as pd
+import Constants
 from nltk.tokenize import TweetTokenizer
 
 nlp = TweetTokenizer()
@@ -58,6 +59,11 @@ def build_vocab(text, threshold):
     for word, cnt in counter.items():
         word_count[word] = cnt
     # Adds the words to the vocabulary.
+    
+    vocab.add_word(Constants.PAD_WORD)
+    vocab.add_word(Constants.UNK_WORD)
+    vocab.add_word(Constants.BOS_WORD)
+    vocab.add_word(Constants.EOS_WORD)
     for i, word in enumerate(words):
         vocab.add_word(word)
     for word, idx in vocab.word2idx.items():
