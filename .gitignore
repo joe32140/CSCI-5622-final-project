@@ -110,3 +110,4 @@ venv.bak/
 ./small_val
 *.pkl
 *.jpg
+*.chkpt
