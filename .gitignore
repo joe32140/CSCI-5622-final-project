@@ -111,3 +111,6 @@ venv.bak/
 *.pkl
 *.jpg
 *.chkpt
+
+whats-cooking/test.json
+whats-cooking/train.json
