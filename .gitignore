@@ -104,7 +104,7 @@ venv.bak/
 .mypy_cache/
 
 # big dataset
-*.json
+#*.json
 ./small_test
 ./small_train
 ./small_val
