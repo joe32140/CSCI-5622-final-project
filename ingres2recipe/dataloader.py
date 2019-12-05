@@ -16,13 +16,18 @@ class Ingres2RecipeDataset(Dataset):
         self.data = data
         self.vocab = vocab
         self.max_len = 40
+        self.cuisine_dic = {c:i for i, c in enumerate(['italian', 'french', 'british', 'indian', 'southern_us', 'mexican',
+       'chinese', 'thai', 'cajun_creole', 'brazilian', 'greek',
+       'japanese', 'spanish', 'irish', 'moroccan', 'korean', 'jamaican',
+       'vietnamese', 'russian'])}
 
     def __getitem__(self, index):
         # 0: recipe_id, 1:instruction/recipe, 2:list of ingres
         recipe = self.data[index][1]
         ingres = self.data[index][2]
         ingres = " ".join(ingres)
-
+        cuisine = self.data[index][3]
+        
         # tokenize recipe
         r_tokens = []
         tokenized_r = nlp.tokenize(recipe)
@@ -33,11 +38,14 @@ class Ingres2RecipeDataset(Dataset):
         tokenized_i = nlp.tokenize(ingres)
         i_tokens.extend([self.vocab(token) for i, token in enumerate(tokenized_i) if i<self.max_len])
 
-
-        return r_tokens, i_tokens
+        # cuisine one-hot encoding
+        cuisine_id = self.cuisine_dic[cuisine]
+        cuisine_one_hot = [0]*len(self.cuisine_dic)
+        cuisine_one_hot[cusine_id] = 1
+        return r_tokens, i_tokens, cuisine_one_hot
 
     def collate_fn(self, data):
-        recipes, ingres = zip(*data)
+        recipes, ingres, cuisines = zip(*data)
         r_lengths = [len(x) for x in recipes]
         i_lengths = [len(x) for x in ingres]
 
@@ -46,9 +54,10 @@ class Ingres2RecipeDataset(Dataset):
 
         recipes = torch.LongTensor(padded_recipes).view(-1, self.max_len)
         ingres = torch.LongTensor(padded_ingres).view(-1, self.max_len)
+        cuisines = torch.FloatTensor(cuisines).view(-1, len(self.cuisine_dic))
         r_lengths = torch.LongTensor(r_lengths).view(-1,1)
         i_lengths = torch.LongTensor(i_lengths).view(-1,1)
-        return recipes, ingres, r_lengths, i_lengths
+        return recipes, ingres, cuisines, r_lengths, i_lengths
 
     def __len__(self):
         return len(self.data)
@@ -74,7 +83,6 @@ def get_loaders(args):
     valid = json.load(open('val.json'))
     test = json.load(open('test.json'))
 
-    #train, valid = train_test_split(train, test_size=0.2, random_state=19)
     print("train size", len(train))
     print("val size", len(valid))
     print("test size", len(test))
