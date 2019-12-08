@@ -25,10 +25,14 @@ def train_epoch(model, training_data, optimizer, loss_fn, device, opt):
 
         optimizer.zero_grad()
         # prepare data
-        recipes, ingres, r_length, i_length = map(lambda x: x.to(device), batch)
-        r_embedd, i_embedd = model(recipes, ingres, r_length, i_length)
+        recipes, ingres, cuisines, r_length, i_length = map(lambda x: x.to(device), batch[0])
+        r_embedd, i_embedd = model(recipes, ingres, cuisines, r_length, i_length)
+
+        i_embedd = torch.cat([i_embedd, i_embedd], dim=0)
+        r_embedd = torch.cat([r_embedd, torch.flip(r_embedd, [0])], dim=0)
         # backward
-        loss = loss_fn(r_embedd, i_embedd, torch.ones(r_length.size()))
+        labels = torch.cat([torch.ones(r_length.size()), -1*torch.ones(r_length.size())], dim=0).squeeze().to(device)
+        loss = loss_fn(r_embedd, i_embedd, labels)
         loss.backward()
         optimizer.step()
         # note keeping
@@ -54,11 +58,14 @@ def eval_epoch(model, validation_data, loss_fn, device, opt):
         for batch in tqdm(
                 validation_data, mininterval=2,
                 desc='  - (Validation) ', leave=False):
-            # prepare data
-            recipes, ingres, r_length, i_length = map(lambda x: x.to(device), batch)
-            r_embedd, i_embedd = model(recipes, ingres, r_length, i_length)
+            recipes, ingres, cuisines, r_length, i_length = map(lambda x: x.to(device), batch[0])
+            r_embedd, i_embedd = model(recipes, ingres, cuisines, r_length, i_length)
+
+            i_embedd = torch.cat([i_embedd, i_embedd], dim=0)
+            r_embedd = torch.cat([r_embedd, torch.flip(r_embedd, [0])], dim=0)
             # backward
-            loss = loss_fn(r_embedd, i_embedd, torch.ones(r_length.size()))
+            labels = torch.cat([torch.ones(r_length.size()), -1*torch.ones(r_length.size())], dim=0).squeeze().to(device)
+            loss = loss_fn(r_embedd, i_embedd, labels)
             # note keeping
             total_loss += loss.item()
             count +=1
@@ -72,24 +79,47 @@ def test(model, test_data, loss_fn, device, opt):
     model.eval()
     count=0
     total_loss = 0
-    mortality_all = []
-    pred_all = []
+    query_embedds = []
+    target_embedds = []
+    recipe_ids = []
     with torch.no_grad():
         for batch in tqdm(
                 test_data, mininterval=2,
                 desc='  - (Validation) ', leave=False):
             # prepare data
-            recipes, ingres, r_length, i_length = map(lambda x: x.to(device), batch)
-            r_embedd, i_embedd = model(recipes, ingres, r_length, i_length)
+            recipes, ingres, cuisines, r_length, i_length = map(lambda x: x.to(device), batch)
+            r_embedd, i_embedd = model(recipes, ingres, cuisines, r_length, i_length)
+            
+            query_embedds.append(i_embedd)
+            target_embedds.append(r_embedd)
+    query_embedds = torch.cat(query_embedds, dim=0)
+    target_embedds = torch.cat(target_embedds, dim=0)
 
-            # backward
-            loss = loss_fn(r_embedd, i_embedd)
-            # note keeping
-            total_loss += loss.item()
-            count +=1
-    loss_per_word = total_loss/count
-    print("----- Test Result -----")
-    print("Loss:", loss_per_word)
+    ranking(query_embedds, target_embedds, recipe_ids)
+
+def ranking(query_embedds, target_embedds, img_ids):                                                                                                          
+    """                                                                                                                                                       
+    @ param query_embedds = (n, d)                                                                                                                            
+    @ param target_embedds = (n, d)                                                                                                                           
+    @ param img_ids = (n,)                                                                                                                                    
+    """
+    cos_sim = torch.mm(query_embedds,target_embedds.T)/ \
+        torch.mm(query_embedds.norm(2, dim=1, keepdim=True),                                                                                          
+                    target_embedds.norm(2, dim=1, keepdim=True).T)                                                                                        
+    _, idx = torch.topk(cos_sim, len(query_embedds)//100, dim=1)                                                                                              
+    top20 = idx.cpu().numpy()                                                                                                                                 
+    img_ids = np.array(img_ids)                                                                                                                               
+    count = 0                                                                                                                                                 
+    with open('answer.csv', 'w') as f:                                                                                                                        
+        f.write("Descritpion_ID,Top_20_Image_IDs\n")                                                                                                          
+        for i, img_id in enumerate(img_ids):                                                                                                                  
+            top_imgs = img_ids[top20[i]]                                                                                                                      
+            top_imgs_str = " ".join(list(top_imgs))                                                                                                           
+            text_id = img_id.split(".")[0]+".txt"                                                                                                             
+            f.write(text_id+","+top_imgs_str+"\n")                                                                                                            
+            if img_id in list(top_imgs):                                                                                                                      
+                count+=1                                                                                                                                      
+        print("count", count)
 
 def train(model, training_data, validation_data, optimizer, loss_fn, device, opt):
     ''' Start training '''
@@ -115,6 +145,7 @@ def train(model, training_data, validation_data, optimizer, loss_fn, device, opt
             log_vf.write('epoch,loss\n')
 
     valid_losses = []
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=1, verbose=True)
     for epoch_i in range(opt.epoch):
         print('[ Epoch', epoch_i, ']')
 
@@ -142,6 +173,8 @@ def train(model, training_data, validation_data, optimizer, loss_fn, device, opt
                    elapse=(time.time()-start)/60))
 
         valid_losses += [valid_loss]
+
+        scheduler.step(train_loss)
 
         model_state_dict = model.state_dict()
         checkpoint = {
@@ -198,18 +231,18 @@ def main():
 
     #========= Loading Dataset =========#
     torch.manual_seed(1234)
-    training_data, validation_data, test_data, vocab= dataloader.get_loaders(opt)
+    training_data, validation_data, test_data, vocab, cuisine_label= dataloader.get_loaders(opt)
 
     #========= Preparing Model =========#
     print(opt)
 
     device = torch.device(f'cuda:{opt.device}' if opt.cuda else 'cpu')
 
-    dan = Ingres2Recipe(len(vocab), opt.embedding_size, opt.dropout).to(device)
+    dan = Ingres2Recipe(len(vocab), len(cuisine_label), opt.embedding_size, opt.dropout).to(device)
     optimizer = optim.Adam(
             dan.parameters(),
-            betas=(0.9, 0.98), eps=1e-09, lr=0.0001)
-    loss_fn = nn.CosineEmbeddingLoss()
+            betas=(0.9, 0.98), eps=1e-09, lr=0.003)
+    loss_fn = nn.CosineEmbeddingLoss(margin=0.2)
     if not opt.test_mode:
         train(dan, training_data, validation_data, optimizer, loss_fn, device ,opt)
 

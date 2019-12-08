@@ -12,17 +12,15 @@ from nltk.tokenize import TweetTokenizer
 nlp = TweetTokenizer()
 
 class Ingres2RecipeDataset(Dataset):
-    def __init__(self, vocab, data, feature=None, period="24"):
+    def __init__(self, vocab, cuisine_vocab, data, feature=None, period="24"):
         self.data = data
         self.vocab = vocab
         self.max_len = 40
-        self.cuisine_dic = {c:i for i, c in enumerate(['italian', 'french', 'british', 'indian', 'southern_us', 'mexican',
-       'chinese', 'thai', 'cajun_creole', 'brazilian', 'greek',
-       'japanese', 'spanish', 'irish', 'moroccan', 'korean', 'jamaican',
-       'vietnamese', 'russian'])}
+        self.cuisine_vocab = cuisine_vocab
 
     def __getitem__(self, index):
         # 0: recipe_id, 1:instruction/recipe, 2:list of ingres
+        recipe_id = self.data[index][0]
         recipe = self.data[index][1]
         ingres = self.data[index][2]
         ingres = " ".join(ingres)
@@ -39,13 +37,13 @@ class Ingres2RecipeDataset(Dataset):
         i_tokens.extend([self.vocab(token) for i, token in enumerate(tokenized_i) if i<self.max_len])
 
         # cuisine one-hot encoding
-        cuisine_id = self.cuisine_dic[cuisine]
-        cuisine_one_hot = [0]*len(self.cuisine_dic)
-        cuisine_one_hot[cusine_id] = 1
-        return r_tokens, i_tokens, cuisine_one_hot
+        cuisine_id = self.cuisine_vocab[cuisine]
+        cuisine_one_hot = [0]*len(self.cuisine_vocab)
+        cuisine_one_hot[cuisine_id] = 1
+        return r_tokens, i_tokens, cuisine_one_hot, recipe_id
 
     def collate_fn(self, data):
-        recipes, ingres, cuisines = zip(*data)
+        recipes, ingres, cuisines, recipe_ids = zip(*data)
         r_lengths = [len(x) for x in recipes]
         i_lengths = [len(x) for x in ingres]
 
@@ -54,16 +52,16 @@ class Ingres2RecipeDataset(Dataset):
 
         recipes = torch.LongTensor(padded_recipes).view(-1, self.max_len)
         ingres = torch.LongTensor(padded_ingres).view(-1, self.max_len)
-        cuisines = torch.FloatTensor(cuisines).view(-1, len(self.cuisine_dic))
+        cuisines = torch.FloatTensor(cuisines).view(-1, len(self.cuisine_vocab))
         r_lengths = torch.LongTensor(r_lengths).view(-1,1)
         i_lengths = torch.LongTensor(i_lengths).view(-1,1)
-        return recipes, ingres, cuisines, r_lengths, i_lengths
+        return (recipes, ingres, cuisines, r_lengths, i_lengths), recipe_ids
 
     def __len__(self):
         return len(self.data)
 
-def get_loader(data, vocab, batch_size, shuffle, num_workers):
-    ingres2recipe = Ingres2RecipeDataset(vocab, data)
+def get_loader(data, vocab, cuisine_vocab, batch_size, shuffle, num_workers):
+    ingres2recipe = Ingres2RecipeDataset(vocab, cuisine_vocab, data)
 
     data_loader = torch.utils.data.DataLoader(dataset=ingres2recipe,
                                               batch_size=batch_size,
@@ -77,18 +75,22 @@ def get_loaders(args):
         print("----- Loading Vocab -----")
         vocab = pickle.load(f)
         print(f"vocab size: {len(vocab)}")
+    cuisine_vocab = {c:i for i, c in enumerate(['italian', 'french', 'british', 'indian', 'southern_us', 'mexican',
+       'chinese', 'thai', 'cajun_creole', 'brazilian', 'greek',
+       'japanese', 'spanish', 'irish', 'moroccan', 'korean', 'jamaican',
+       'vietnamese', 'russian'])}
     print('----- Loading Note -----')
 
     train = json.load(open('train.json'))
     valid = json.load(open('val.json'))
     test = json.load(open('test.json'))
-
+    
     print("train size", len(train))
     print("val size", len(valid))
     print("test size", len(test))
     print()
     print('----- Building Loaders -----')
-    train_loader = get_loader(train, vocab, args.batch_size, True, 10)
-    valid_loader = get_loader(valid, vocab, args.batch_size, True, 10)
-    test_loader = get_loader(test, vocab, args.batch_size, False, 10)
-    return train_loader, valid_loader, test_loader, vocab
+    train_loader = get_loader(train, vocab, cuisine_vocab, args.batch_size, True, 10)
+    valid_loader = get_loader(valid, vocab, cuisine_vocab, args.batch_size, True, 10)
+    test_loader = get_loader(test, vocab, cuisine_vocab, args.batch_size, False, 10)
+    return train_loader, valid_loader, test_loader, vocab, cuisine_vocab

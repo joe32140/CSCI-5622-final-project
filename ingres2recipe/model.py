@@ -7,9 +7,9 @@ import torch
 
 class Ingres2Recipe(nn.Module):
     """
-    BagOfWords classification model
+    BagOfWords ranking model
     """
-    def __init__(self, vocab_size, emb_dim, dropout):
+    def __init__(self, vocab_size, cuisine_size, emb_dim, dropout):
         """
         @param vocab_size: size of the vocabulary.
         @param emb_dim: size of the word embedding
@@ -18,7 +18,8 @@ class Ingres2Recipe(nn.Module):
         # pay attention to padding_idx
         self.embed = nn.Embedding(vocab_size, emb_dim, padding_idx=0)
 
-        self.linear_r1 = nn.Linear(emb_dim, 200)
+        self.linear_c = nn.Linear(cuisine_size, 30)
+        self.linear_r1 = nn.Linear(emb_dim+30, 200)
         self.linear_r2 = nn.Linear(200, 100)
         self.linear_i1 = nn.Linear(emb_dim, 200)
         self.linear_i2 = nn.Linear(200, 100)
@@ -26,18 +27,21 @@ class Ingres2Recipe(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.batchnorm = nn.BatchNorm1d(200)
 
-    def forward(self, recipes, ingres, r_length, i_length):
+    def forward(self, recipes, ingres, cuisines, r_length, i_length):
         """
         @param recipes, ingres: matrix of size (batch_size, max_sentence_length). Each row in data represents a
             review that is represented using n-gram index. Note that they are padded to have same length.
         @param r_length, i_length: an int tensor of size (batch_size), which represents the non-trivial (excludes padding)
             length of each sentences in the data.
         """
+        c = self.dropout(F.elu(self.linear_c(cuisines)))
+
         r = self.embed(recipes)
         r = self.dropout(r)
         r = torch.sum(r, dim=1)
         r /= r_length.float()+ 1e-10
-        r = self.linear_r1(r)
+        r = torch.cat([r,c], dim=1)
+        r = F.elu(self.linear_r1(r))
         r = self.dropout(r)
         r = self.linear_r2(r)
 
@@ -45,8 +49,10 @@ class Ingres2Recipe(nn.Module):
         ing = self.dropout(ing)
         ing = torch.sum(ing, dim=1)
         ing /= i_length.float() + 1e-10
-        ing = self.linear_i1(ing)
+        ing = F.elu(self.linear_i1(ing))
         ing = self.dropout(ing)
         ing = self.linear_i2(ing)
+
+        c = F.elu(self.linear_c(cuisines))
 
         return r, ing
